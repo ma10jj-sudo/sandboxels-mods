@@ -1,5 +1,6 @@
 // Multichannel Wires Mod
 // Red, Blue, Green, and Yellow independent power networks
+// copy and paste the url in mod menu
 
 function spreadChannelPower(pixel, channelName) {
     if(pixel.signalTimer === undefined) {
