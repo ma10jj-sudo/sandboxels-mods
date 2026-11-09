@@ -1,31 +1,174 @@
-// Color Screen + Power Button - a Sandboxels mod
-// Companion to multicolor_wire.js (Red / Blue / Green / Yellow wires).
-// https://raw.githubusercontent.com/ma10jj-sudo/sandboxels-mods/refs/heads/main/multicolor_wire.js
+// Multicolor Wires + Screen + Power Button + Constant Converters - a Sandboxels mod
+// Combines multicolor_wire.js and multicolor_wire_screen.js, plus a new part:
 //
-// Adds (under "machines"):
-//   Screen Pixel  - lights up from the powered wires touching it (up/down/left/right)
-//                   and mixes them: red/green/blue = RGB channels, yellow = red+green,
-//                   regular wire = white.
-//   Power Button  - click it to toggle ON/OFF (works with any tool selected).
-//                   OFF (red):   does nothing.
-//                   ON  (green): CONSTANTLY powers every wire connected to it
-//                                (including Red/Green/Blue/Yellow wires). No pulsing.
+//   Constant Converters (Red/Blue/Green/Yellow) - once they receive power from any
+//   source they latch ON and output a steady, continuous charge into wires of
+//   THEIR color (like a battery) for as long as input keeps arriving. When the
+//   input stops, they shut off after a short hold time.
+//   They do NOT accept power from their own output color, so they can't feed
+//   themselves and latch forever.
 //
-// Load AFTER multicolor_wire.js.
+// All parts are in the "machines" category.
 
 (function () {
+	const COLORS = {
+		red:    { dark: "#7a1b1b", on: "#ff4040", conv: ["#b8b8b8", "#ff4040"], rgb: [1, 0, 0] },
+		blue:   { dark: "#1b2f7a", on: "#4a7dff", conv: ["#b8b8b8", "#4a7dff"], rgb: [0, 0, 1] },
+		green:  { dark: "#1b6a2a", on: "#45ff6a", conv: ["#b8b8b8", "#45ff6a"], rgb: [0, 1, 0] },
+		yellow: { dark: "#8a7a10", on: "#fff04a", conv: ["#b8b8b8", "#fff04a"], rgb: [1, 1, 0] },
+	};
+
+	const CONST_HOLD = 10; // ticks the constant converter stays ON after its last input
+
+	const wireOf = {};  // element name -> color key
+	const convOf = {};  // element name -> output color key (pulse converters)
+	const constOf = {}; // element name -> output color key (constant converters)
+
+	for (const key in COLORS) {
+		const c = COLORS[key];
+		const label = key.charAt(0).toUpperCase() + key.slice(1);
+
+		// ---------- Wire ----------
+		elements[key + "_wire"] = {
+			name: label + " Wire",
+			color: c.dark,
+			colorOn: c.on,
+			behavior: behaviors.WALL,
+			category: "machines",
+			state: "solid",
+			conduct: 1,
+			density: 8000,
+			tempHigh: 1085,
+			stateHigh: "molten_copper",
+			desc: label + " wire. Only passes power to other " + key + " wires (and to devices). Use a converter to change colors.",
+		};
+		wireOf[key + "_wire"] = key;
+
+		// ---------- Pulse converter (original) ----------
+		elements[key + "_converter"] = {
+			name: label + " Converter",
+			color: c.conv,
+			colorOn: c.on,
+			behavior: behaviors.WALL,
+			category: "machines",
+			state: "solid",
+			conduct: 1,
+			density: 8000,
+			tempHigh: 1085,
+			stateHigh: "molten_copper",
+			desc: "Takes power from any wire and outputs it ONLY into " + key + " wires.",
+		};
+		convOf[key + "_converter"] = key;
+
+		// ---------- Constant-output converter (new) ----------
+		const dim = c.dark;
+		const bright = c.on;
+		elements[key + "_constant_converter"] = {
+			name: label + " Constant Converter",
+			color: dim,
+			behavior: behaviors.WALL,
+			category: "machines",
+			state: "solid",
+			conduct: 1,
+			density: 8000,
+			tempHigh: 1085,
+			stateHigh: "molten_copper",
+			desc: "When powered, outputs a constant steady charge into " + key + " wires, like a battery. Ignores power from " + key + " wires.",
+			tick: function (pixel) {
+				if (!(pixel.active > 0)) {
+					if (pixel.color !== dim) pixel.color = dim;
+					return;
+				}
+				pixel.active--;
+				if (pixel.color !== bright) pixel.color = bright;
+
+				// Constant output: charge every neighbouring conductor each tick.
+				for (let i = 0; i < adjacentCoords.length; i++) {
+					const x = pixel.x + adjacentCoords[i][0];
+					const y = pixel.y + adjacentCoords[i][1];
+					if (pixelMap[x] === undefined || !pixelMap[x][y]) continue;
+					const n = pixelMap[x][y];
+					if (n.del) continue;
+					const info = elements[n.element];
+					if (!info || !info.conduct) continue;
+					if (n.charge || n.chargeCD) continue;
+					if (wireOf[n.element] !== undefined && wireOf[n.element] !== key) continue; // wrong color
+					if (constOf[n.element] === key) continue; // don't ping-pong with same-color constant converters
+					n.charge = 1;
+					if (wireOf[n.element] === undefined && convOf[n.element] === undefined && constOf[n.element] === undefined) {
+						n.from = key;
+					}
+				}
+			},
+		};
+		constOf[key + "_constant_converter"] = key;
+	}
+
+	// Spread a charge from `pixel` as color `key`.
+	function spreadFrom(pixel, key) {
+		for (let i = 0; i < adjacentCoords.length; i++) {
+			const x = pixel.x + adjacentCoords[i][0];
+			const y = pixel.y + adjacentCoords[i][1];
+			if (pixelMap[x] === undefined || !pixelMap[x][y]) continue;
+			const n = pixelMap[x][y];
+			if (n.del) continue;
+			const info = elements[n.element];
+			if (!info || !info.conduct) continue;
+			if (n.charge || n.chargeCD) continue;
+
+			const isWire = wireOf[n.element] !== undefined;
+			const isConv = convOf[n.element] !== undefined;
+			const isConst = constOf[n.element] !== undefined;
+
+			if (isWire && wireOf[n.element] !== key) continue;      // blocked color
+			if (isConst && constOf[n.element] === key) continue;    // constant converter ignores its own color
+			if (Math.random() > info.conduct) continue;
+
+			n.charge = 1;
+			if (!isWire && !isConv && !isConst) n.from = key;
+		}
+		delete pixel.charge;
+		pixel.chargeCD = 4;
+	}
+
+	if (typeof doElectricity === "function") {
+		const origDoElectricity = doElectricity;
+		doElectricity = function (pixel) {
+			if (!pixel.charge) return origDoElectricity(pixel);
+
+			const el = pixel.element;
+			if (wireOf[el] !== undefined) return spreadFrom(pixel, wireOf[el]);
+			if (convOf[el] !== undefined) return spreadFrom(pixel, convOf[el]);
+
+			// Constant converter: input just (re)arms it; its tick() does the output.
+			if (constOf[el] !== undefined) {
+				pixel.active = CONST_HOLD;
+				delete pixel.charge;
+				pixel.chargeCD = 4;
+				return;
+			}
+
+			// A normal conductor that was powered by one of our colors.
+			if (pixel.from !== undefined) {
+				const key = pixel.from;
+				delete pixel.from;
+				return spreadFrom(pixel, key);
+			}
+			return origDoElectricity(pixel);
+		};
+	} else {
+		console.error("[multicolor_wire_combined] doElectricity not found; wires won't be color-isolated.");
+	}
+
 	// ---------- Screen pixel ----------
 	const SOURCES = {
-		red_wire:         [1, 0, 0],
-		green_wire:       [0, 1, 0],
-		blue_wire:        [0, 0, 1],
-		yellow_wire:      [1, 1, 0],
-		red_converter:    [1, 0, 0],
-		green_converter:  [0, 1, 0],
-		blue_converter:   [0, 0, 1],
-		yellow_converter: [1, 1, 0],
-		wire:             [1, 1, 1],
+		wire: [1, 1, 1],
 	};
+	for (const key in COLORS) {
+		SOURCES[key + "_wire"] = COLORS[key].rgb;
+		SOURCES[key + "_converter"] = COLORS[key].rgb;
+		SOURCES[key + "_constant_converter"] = COLORS[key].rgb;
+	}
 	const HOLD = 6;
 	const OFF = [28, 32, 38];
 
@@ -49,7 +192,7 @@
 				const n = pixelMap[x][y];
 				const src = SOURCES[n.element];
 				if (!src) continue;
-				if (!(n.charge || n.chargeCD)) continue;
+				if (!(n.charge || n.chargeCD || n.active > 0)) continue;
 				for (let k = 0; k < 3; k++) if (src[k]) pixel.ch[k] = HOLD;
 			}
 
@@ -62,21 +205,7 @@
 		},
 	};
 
-	// ---------- Power button (switch + constant power source) ----------
-	// Two elements: power_button (off) and power_button_on. Only the OFF one is in the menu.
-
-	// Elements the power button keeps constantly powered (the whole connected wire network)
-	const WIRES = {
-		wire: 1, red_wire: 1, green_wire: 1, blue_wire: 1, yellow_wire: 1,
-	};
-	// Safety cap so giant networks don't lag the game
-	const MAX_FLOOD = 10000;
-
-	function holdOn(n) {
-		n.charge = 1;
-		delete n.chargeCD;
-	}
-
+	// ---------- Power button (switch + power source) ----------
 	elements.power_button = {
 		name: "Power Button",
 		color: "#8a2222",
@@ -86,7 +215,7 @@
 		density: 2000,
 		tempHigh: 1085,
 		stateHigh: "molten_copper",
-		desc: "Click it to turn it ON/OFF. When ON it constantly powers every wire connected to it.",
+		desc: "Click it to turn it ON/OFF. When ON it powers any wire touching it.",
 	};
 
 	elements.power_button_on = {
@@ -99,12 +228,8 @@
 		tempHigh: 1085,
 		stateHigh: "molten_copper",
 		hidden: true,
-		desc: "Power button, currently ON. Constantly powers every wire connected to it. Click it to turn it off.",
+		desc: "Power button, currently ON. Click it to turn it off.",
 		tick: function (pixel) {
-			const visited = new Set();
-			const stack = [];
-
-			// Seed: everything touching the button
 			for (let i = 0; i < adjacentCoords.length; i++) {
 				const x = pixel.x + adjacentCoords[i][0];
 				const y = pixel.y + adjacentCoords[i][1];
@@ -112,41 +237,18 @@
 				const n = pixelMap[x][y];
 				if (n.element === "power_button_on") continue;
 				const info = elements[n.element];
-				if (!info || !info.conduct) continue;
-				holdOn(n);
-				if (WIRES[n.element] && !visited.has(n)) {
-					visited.add(n);
-					stack.push(n);
-				}
-			}
-
-			// Flood through connected wires, holding each one charged
-			while (stack.length && visited.size < MAX_FLOOD) {
-				const p = stack.pop();
-				for (let i = 0; i < adjacentCoords.length; i++) {
-					const x = p.x + adjacentCoords[i][0];
-					const y = p.y + adjacentCoords[i][1];
-					if (pixelMap[x] === undefined || !pixelMap[x][y]) continue;
-					const n = pixelMap[x][y];
-					if (visited.has(n) || !WIRES[n.element]) continue;
-					visited.add(n);
-					holdOn(n);
-					stack.push(n);
+				if (info && info.conduct && !n.charge && !n.chargeCD) {
+					n.charge = 1;
 				}
 			}
 		},
 	};
 
 	function toggleButton(pixel) {
-		if (pixel.element === "power_button") {
-			changePixel(pixel, "power_button_on");
-		} else {
-			changePixel(pixel, "power_button");
-		}
+		changePixel(pixel, pixel.element === "power_button" ? "power_button_on" : "power_button");
 	}
 
-	// Click anywhere on a power button (any tool selected) to toggle it.
-	// Runs in the capture phase and cancels the event so the game doesn't also draw.
+	// Click a power button (any tool selected) to toggle it.
 	document.addEventListener("pointerdown", function (e) {
 		try {
 			const canvas = document.getElementById("game");
@@ -165,15 +267,7 @@
 				e.stopPropagation();
 			}
 		} catch (err) {
-			console.error("[color_screen] power button click error:", err);
+			console.error("[multicolor_wire_combined] power button click error:", err);
 		}
 	}, true);
-
-	if (typeof runAfterLoad === "function") {
-		runAfterLoad(function () {
-			if (!elements.red_wire) {
-				console.warn("[color_screen] multicolor_wire.js isn't loaded; only regular wire (white) will light the screen.");
-			}
-		});
-	}
 })();
