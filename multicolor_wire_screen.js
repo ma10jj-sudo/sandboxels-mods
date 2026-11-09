@@ -1,22 +1,19 @@
-// Color Screen & Monitor - a Sandboxels mod
+// Color Screen + Power Button - a Sandboxels mod
 // Companion to multicolor_wire.js (Red / Blue / Green / Yellow wires).
 // https://raw.githubusercontent.com/ma10jj-sudo/sandboxels-mods/refs/heads/main/multicolor_wire.js
 //
-// Adds (all under the "machines" category):
-//   Screen Pixel        - a single display pixel. Lights up based on the powered
-//                         wires touching it (up/down/left/right) and MIXES them:
-//                           red + green + blue = RGB channels, yellow = red+green,
-//                           regular wire / white = all channels.
-//   Monitor (Solid)     - click to spawn a full monitor: bezel, stand, solid screen.
-//                         Drive the pixels by running powered wires against the screen.
-//   Monitor (Wireable)  - same, but the screen is a checkerboard of pixels so you can
-//                         draw wires in the gaps. Each wire dot lights the 4 pixels around it.
-//   Monitor Bezel/Stand - the pieces, if you want to build your own shape.
+// Adds (under "machines"):
+//   Screen Pixel  - lights up from the powered wires touching it (up/down/left/right)
+//                   and mixes them: red/green/blue = RGB channels, yellow = red+green,
+//                   regular wire = white.
+//   Power Button  - a switch. Click it with the SHOCK tool to toggle ON/OFF.
+//                   OFF (red):   blocks power.
+//                   ON  (green): passes power like a wire (and respects wire colors).
 //
-// Load AFTER multicolor_wire.js (or at least have it loaded in the same session).
+// Load AFTER multicolor_wire.js.
 
 (function () {
-	// Which wire-ish elements light which channels: [R, G, B]
+	// ---------- Screen pixel ----------
 	const SOURCES = {
 		red_wire:         [1, 0, 0],
 		green_wire:       [0, 1, 0],
@@ -26,13 +23,11 @@
 		green_converter:  [0, 1, 0],
 		blue_converter:   [0, 0, 1],
 		yellow_converter: [1, 1, 0],
-		wire:             [1, 1, 1], // normal Sandboxels wire = white
+		wire:             [1, 1, 1],
 	};
+	const HOLD = 6;
+	const OFF = [28, 32, 38];
 
-	const HOLD = 6;                 // ticks a channel stays lit after the last pulse (smooths wire pulsing)
-	const OFF = [28, 32, 38];       // dark "screen off" color
-
-	// ---------- Screen pixel ----------
 	elements.screen_pixel = {
 		name: "Screen Pixel",
 		color: "#1c2026",
@@ -53,7 +48,7 @@
 				const n = pixelMap[x][y];
 				const src = SOURCES[n.element];
 				if (!src) continue;
-				if (!(n.charge || n.chargeCD)) continue; // wire isn't powered
+				if (!(n.charge || n.chargeCD)) continue;
 				for (let k = 0; k < 3; k++) if (src[k]) pixel.ch[k] = HOLD;
 			}
 
@@ -66,90 +61,66 @@
 		},
 	};
 
-	// ---------- Monitor parts ----------
-	elements.monitor_bezel = {
-		name: "Monitor Bezel",
-		color: ["#2a2a30", "#2e2e35"],
+	// ---------- Power button (switch) ----------
+	// Two elements: _off (no conduction) and _on (conducts). Only the OFF one is in the menu.
+	elements.power_button = {
+		name: "Power Button",
+		color: "#8a2222",
 		behavior: behaviors.WALL,
 		category: "machines",
 		state: "solid",
-		density: 1200,
-		tempHigh: 250,
-		stateHigh: "molten_plastic",
-		desc: "Plastic frame for monitors.",
+		density: 2000,
+		tempHigh: 1085,
+		stateHigh: "molten_copper",
+		desc: "A switch. Click it with the Shock tool to turn it ON/OFF. OFF blocks power.",
 	};
-	elements.monitor_stand = {
-		name: "Monitor Stand",
-		color: ["#3a3a42", "#42424b"],
+
+	elements.power_button_on = {
+		name: "Power Button (On)",
+		color: "#2a9a3a",
+		colorOn: "#9affb0",
 		behavior: behaviors.WALL,
 		category: "machines",
 		state: "solid",
-		density: 1500,
-		tempHigh: 250,
-		stateHigh: "molten_plastic",
-		desc: "Stand for monitors.",
+		conduct: 1,
+		density: 2000,
+		tempHigh: 1085,
+		stateHigh: "molten_copper",
+		hidden: true,
+		desc: "Power button, currently ON. Click with the Shock tool to turn it off.",
 	};
 
-	// ---------- Monitor spawner ----------
-	const SW = 24, SH = 14, B = 2; // screen width/height, bezel thickness
-
-	function buildMonitor(pixel, checker) {
-		const ox = pixel.x, oy = pixel.y;
-		const W = SW + B * 2, H = SH + B * 2;
-		const cx = ox + Math.floor(W / 2);
-		const cells = []; // [element, x, y]
-
-		for (let dy = 0; dy < H; dy++) {
-			for (let dx = 0; dx < W; dx++) {
-				const inScreen = dx >= B && dx < W - B && dy >= B && dy < H - B;
-				if (!inScreen) {
-					cells.push(["monitor_bezel", ox + dx, oy + dy]);
-				} else if (!checker || ((dx - B) + (dy - B)) % 2 === 0) {
-					cells.push(["screen_pixel", ox + dx, oy + dy]);
-				}
-			}
-		}
-		// neck (2 wide, 3 tall) + base (12 wide, 1 tall)
-		for (let n = 0; n < 3; n++) {
-			cells.push(["monitor_stand", cx - 1, oy + H + n]);
-			cells.push(["monitor_stand", cx, oy + H + n]);
-		}
-		for (let b = -6; b < 6; b++) cells.push(["monitor_stand", cx + b, oy + H + 3]);
-
-		// Make sure it all fits before touching anything
-		for (let i = 0; i < cells.length; i++) {
-			if (outOfBounds(cells[i][1], cells[i][2])) {
-				deletePixel(pixel.x, pixel.y);
-				return;
-			}
-		}
-		deletePixel(pixel.x, pixel.y);
-		for (let i = 0; i < cells.length; i++) {
-			const x = cells[i][1], y = cells[i][2];
-			if (pixelMap[x] && pixelMap[x][y]) deletePixel(x, y);
-			createPixel(cells[i][0], x, y);
+	function toggleButton(pixel) {
+		if (pixel.element === "power_button") {
+			changePixel(pixel, "power_button_on");
+		} else {
+			delete pixel.charge;
+			delete pixel.chargeCD;
+			changePixel(pixel, "power_button");
 		}
 	}
 
-	elements.monitor_solid = {
-		name: "Monitor (Solid)",
-		color: "#4a5560",
-		behavior: behaviors.WALL,
-		category: "machines",
-		state: "solid",
-		desc: "Click to spawn a 24x14 monitor (click = top-left corner). Press powered colored wires against the screen to light pixels.",
-		tick: function (pixel) { buildMonitor(pixel, false); },
-	};
+	// Click handling: Shock tool + click on a power button toggles it.
+	document.addEventListener("pointerdown", function (e) {
+		try {
+			const canvas = document.getElementById("game");
+			if (!canvas || e.target !== canvas) return;
+			if (e.button !== undefined && e.button !== 0) return;
+			if (typeof currentElement === "undefined" || currentElement !== "shock") return;
 
-	elements.monitor_wireable = {
-		name: "Monitor (Wireable)",
-		color: "#5a6a78",
-		behavior: behaviors.WALL,
-		category: "machines",
-		state: "solid",
-		desc: "Click to spawn a 24x14 checkerboard monitor. Draw wires in the gaps: each powered wire lights the 4 pixels around it.",
-		tick: function (pixel) { buildMonitor(pixel, true); },
-	};
+			const rect = canvas.getBoundingClientRect();
+			const scale = canvas.width / rect.width;
+			const x = Math.floor((e.clientX - rect.left) * scale / pixelSize);
+			const y = Math.floor((e.clientY - rect.top) * scale / pixelSize);
+			if (pixelMap[x] === undefined || !pixelMap[x][y]) return;
+			const p = pixelMap[x][y];
+			if (p.element === "power_button" || p.element === "power_button_on") {
+				toggleButton(p);
+			}
+		} catch (err) {
+			console.error("[color_screen] power button click error:", err);
+		}
+	});
 
 	if (typeof runAfterLoad === "function") {
 		runAfterLoad(function () {
