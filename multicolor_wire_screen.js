@@ -6,9 +6,10 @@
 //   Screen Pixel  - lights up from the powered wires touching it (up/down/left/right)
 //                   and mixes them: red/green/blue = RGB channels, yellow = red+green,
 //                   regular wire = white.
-//   Power Button  - a switch. Click it with the SHOCK tool to toggle ON/OFF.
-//                   OFF (red):   blocks power.
-//                   ON  (green): passes power like a wire (and respects wire colors).
+//   Power Button  - click it to toggle ON/OFF (works with any tool selected).
+//                   OFF (red):   does nothing.
+//                   ON  (green): acts like a battery and powers any wire/conductor touching it
+//                                (including Red/Green/Blue/Yellow wires).
 //
 // Load AFTER multicolor_wire.js.
 
@@ -61,8 +62,8 @@
 		},
 	};
 
-	// ---------- Power button (switch) ----------
-	// Two elements: _off (no conduction) and _on (conducts). Only the OFF one is in the menu.
+	// ---------- Power button (switch + power source) ----------
+	// Two elements: power_button (off) and power_button_on. Only the OFF one is in the menu.
 	elements.power_button = {
 		name: "Power Button",
 		color: "#8a2222",
@@ -72,41 +73,51 @@
 		density: 2000,
 		tempHigh: 1085,
 		stateHigh: "molten_copper",
-		desc: "A switch. Click it with the Shock tool to turn it ON/OFF. OFF blocks power.",
+		desc: "Click it to turn it ON/OFF. When ON it powers any wire touching it.",
 	};
 
 	elements.power_button_on = {
 		name: "Power Button (On)",
-		color: "#2a9a3a",
-		colorOn: "#9affb0",
+		color: "#2aff5a",
 		behavior: behaviors.WALL,
 		category: "machines",
 		state: "solid",
-		conduct: 1,
 		density: 2000,
 		tempHigh: 1085,
 		stateHigh: "molten_copper",
 		hidden: true,
-		desc: "Power button, currently ON. Click with the Shock tool to turn it off.",
+		desc: "Power button, currently ON. Click it to turn it off.",
+		tick: function (pixel) {
+			// Behave like a battery: charge every adjacent conductor that isn't already charged.
+			for (let i = 0; i < adjacentCoords.length; i++) {
+				const x = pixel.x + adjacentCoords[i][0];
+				const y = pixel.y + adjacentCoords[i][1];
+				if (pixelMap[x] === undefined || !pixelMap[x][y]) continue;
+				const n = pixelMap[x][y];
+				if (n.element === "power_button_on") continue;
+				const info = elements[n.element];
+				if (info && info.conduct && !n.charge && !n.chargeCD) {
+					n.charge = 1;
+				}
+			}
+		},
 	};
 
 	function toggleButton(pixel) {
 		if (pixel.element === "power_button") {
 			changePixel(pixel, "power_button_on");
 		} else {
-			delete pixel.charge;
-			delete pixel.chargeCD;
 			changePixel(pixel, "power_button");
 		}
 	}
 
-	// Click handling: Shock tool + click on a power button toggles it.
+	// Click anywhere on a power button (any tool selected) to toggle it.
+	// Runs in the capture phase and cancels the event so the game doesn't also draw.
 	document.addEventListener("pointerdown", function (e) {
 		try {
 			const canvas = document.getElementById("game");
 			if (!canvas || e.target !== canvas) return;
 			if (e.button !== undefined && e.button !== 0) return;
-			if (typeof currentElement === "undefined" || currentElement !== "shock") return;
 
 			const rect = canvas.getBoundingClientRect();
 			const scale = canvas.width / rect.width;
@@ -116,11 +127,13 @@
 			const p = pixelMap[x][y];
 			if (p.element === "power_button" || p.element === "power_button_on") {
 				toggleButton(p);
+				e.preventDefault();
+				e.stopPropagation();
 			}
 		} catch (err) {
 			console.error("[color_screen] power button click error:", err);
 		}
-	});
+	}, true);
 
 	if (typeof runAfterLoad === "function") {
 		runAfterLoad(function () {
