@@ -8,7 +8,9 @@
 //   They do NOT accept power from their own output color, so they can't feed
 //   themselves and latch forever.
 //
-// All parts are in the "machines" category.
+// Categories:
+//   "wires"    - all wires, converters, constant converters and the power button
+//   "machines" - Screen Pixel only
 
 (function () {
 	const COLORS = {
@@ -17,6 +19,8 @@
 		green:  { dark: "#1b6a2a", on: "#45ff6a", conv: ["#b8b8b8", "#45ff6a"], rgb: [0, 1, 0] },
 		yellow: { dark: "#8a7a10", on: "#fff04a", conv: ["#b8b8b8", "#fff04a"], rgb: [1, 1, 0] },
 	};
+
+	const WIRES_CATEGORY = "wires";
 
 	const LIVE_HOLD = 8;   // ticks a wire stays "lit" after its last pulse (> pulse period, so it looks steady)
 
@@ -55,7 +59,7 @@
 				if (pixel.color !== col) pixel.color = col;
 			},
 			behavior: behaviors.WALL,
-			category: "machines",
+			category: WIRES_CATEGORY,
 			state: "solid",
 			conduct: 1,
 			density: 8000,
@@ -71,7 +75,7 @@
 			color: c.conv,
 			colorOn: c.on,
 			behavior: behaviors.WALL,
-			category: "machines",
+			category: WIRES_CATEGORY,
 			state: "solid",
 			conduct: 1,
 			density: 8000,
@@ -88,7 +92,7 @@
 			name: label + " Constant Converter",
 			color: dim,
 			behavior: behaviors.WALL,
-			category: "machines",
+			category: WIRES_CATEGORY,
 			state: "solid",
 			conduct: 1,
 			density: 8000,
@@ -193,6 +197,7 @@
 	const HOLD = 6;
 	const OFF = [28, 32, 38];
 
+	// Screen Pixel stays in the "machines" category.
 	elements.screen_pixel = {
 		name: "Screen Pixel",
 		color: "#1c2026",
@@ -231,7 +236,7 @@
 		name: "Power Button",
 		color: "#8a2222",
 		behavior: behaviors.WALL,
-		category: "machines",
+		category: WIRES_CATEGORY,
 		state: "solid",
 		density: 2000,
 		tempHigh: 1085,
@@ -243,7 +248,7 @@
 		name: "Power Button (On)",
 		color: "#2aff5a",
 		behavior: behaviors.WALL,
-		category: "machines",
+		category: WIRES_CATEGORY,
 		state: "solid",
 		density: 2000,
 		tempHigh: 1085,
