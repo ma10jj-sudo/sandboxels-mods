@@ -8,7 +8,9 @@
 //   They do NOT accept power from their own output color, so they can't feed
 //   themselves and latch forever.
 //
-// All parts are in the "machines" category.
+// Categories:
+//   "wires"    - all wires, converters, constant converters and the power button
+//   "machines" - Screen Pixel only
 
 (function () {
 	const COLORS = {
@@ -17,6 +19,17 @@
 		green:  { dark: "#1b6a2a", on: "#45ff6a", conv: ["#b8b8b8", "#45ff6a"], rgb: [0, 1, 0] },
 		yellow: { dark: "#8a7a10", on: "#fff04a", conv: ["#b8b8b8", "#fff04a"], rgb: [1, 1, 0] },
 	};
+
+	const WIRES_CATEGORY = "wires";
+
+	const LIVE_HOLD = 8;   // ticks a wire stays "lit" after its last pulse (> pulse period, so it looks steady)
+
+	// Mix a hex color toward another by t (0..1), returns hex.
+	function mix(a, b, t) {
+		const pa = [1, 3, 5].map(i => parseInt(a.substr(i, 2), 16));
+		const pb = [1, 3, 5].map(i => parseInt(b.substr(i, 2), 16));
+		return "#" + pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, "0")).join("");
+	}
 
 	const CONST_HOLD = 10; // ticks the constant converter stays ON after its last input
 
@@ -29,18 +42,30 @@
 		const label = key.charAt(0).toUpperCase() + key.slice(1);
 
 		// ---------- Wire ----------
+		// trail[cd]: cd = ticks-since-pulse counter (4 = pulse head just passed ... 0 = steady glow)
+		const trail = [0, 1, 2, 3, 4].map(cd => mix(c.on, "#ffffff", cd * 0.14));
 		elements[key + "_wire"] = {
 			name: label + " Wire",
 			color: c.dark,
-			colorOn: c.on,
+			colorOn: mix(c.on, "#ffffff", 0.85), // bright head of the moving pulse
+			tick: function (pixel) {
+				let col;
+				if (pixel.live > 0) {
+					pixel.live--;
+					col = trail[Math.min(pixel.chargeCD || 0, 4)];
+				} else {
+					col = c.dark;
+				}
+				if (pixel.color !== col) pixel.color = col;
+			},
 			behavior: behaviors.WALL,
-			category: "machines",
+			category: WIRES_CATEGORY,
 			state: "solid",
 			conduct: 1,
 			density: 8000,
 			tempHigh: 1085,
 			stateHigh: "molten_copper",
-			desc: label + " wire. Only passes power to other " + key + " wires (and to devices). Use a converter to change colors.",
+			desc: label + " wire. Stays steadily lit while powered, with a bright pulse visibly travelling along it. Only passes power to other " + key + " wires (and to devices). Use a converter to change colors.",
 		};
 		wireOf[key + "_wire"] = key;
 
@@ -50,7 +75,7 @@
 			color: c.conv,
 			colorOn: c.on,
 			behavior: behaviors.WALL,
-			category: "machines",
+			category: WIRES_CATEGORY,
 			state: "solid",
 			conduct: 1,
 			density: 8000,
@@ -67,7 +92,7 @@
 			name: label + " Constant Converter",
 			color: dim,
 			behavior: behaviors.WALL,
-			category: "machines",
+			category: WIRES_CATEGORY,
 			state: "solid",
 			conduct: 1,
 			density: 8000,
@@ -137,8 +162,8 @@
 			if (!pixel.charge) return origDoElectricity(pixel);
 
 			const el = pixel.element;
-			if (wireOf[el] !== undefined) return spreadFrom(pixel, wireOf[el]);
-			if (convOf[el] !== undefined) return spreadFrom(pixel, convOf[el]);
+			if (wireOf[el] !== undefined) { pixel.live = LIVE_HOLD; return spreadFrom(pixel, wireOf[el]); }
+			if (convOf[el] !== undefined) { pixel.live = LIVE_HOLD; return spreadFrom(pixel, convOf[el]); }
 
 			// Constant converter: input just (re)arms it; its tick() does the output.
 			if (constOf[el] !== undefined) {
@@ -172,6 +197,7 @@
 	const HOLD = 6;
 	const OFF = [28, 32, 38];
 
+	// Screen Pixel stays in the "machines" category.
 	elements.screen_pixel = {
 		name: "Screen Pixel",
 		color: "#1c2026",
@@ -192,7 +218,7 @@
 				const n = pixelMap[x][y];
 				const src = SOURCES[n.element];
 				if (!src) continue;
-				if (!(n.charge || n.chargeCD || n.active > 0)) continue;
+				if (!(n.charge || n.chargeCD || n.active > 0 || n.live > 0)) continue;
 				for (let k = 0; k < 3; k++) if (src[k]) pixel.ch[k] = HOLD;
 			}
 
@@ -210,7 +236,7 @@
 		name: "Power Button",
 		color: "#8a2222",
 		behavior: behaviors.WALL,
-		category: "machines",
+		category: WIRES_CATEGORY,
 		state: "solid",
 		density: 2000,
 		tempHigh: 1085,
@@ -222,7 +248,7 @@
 		name: "Power Button (On)",
 		color: "#2aff5a",
 		behavior: behaviors.WALL,
-		category: "machines",
+		category: WIRES_CATEGORY,
 		state: "solid",
 		density: 2000,
 		tempHigh: 1085,
