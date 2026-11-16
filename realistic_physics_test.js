@@ -129,14 +129,15 @@
     return bodies || [start];
   }
 
-  function shift(bodies, dx, dy) {
-    let ms;
-    if (bodies.length === 1) ms = bodies[0].members;
-    else { ms = []; for (const b of bodies) for (const m of b.members) ms.push(m); }
-    if (ms.length === 1) { movePixel(ms[0], ms[0].x + dx, ms[0].y + dy); return; }
-    // move the leading edge first so cells are free when needed
-    ms.sort((a, b) => (b.x * dx + b.y * dy) - (a.x * dx + a.y * dy));
-    for (const m of ms) movePixel(m, m.x + dx, m.y + dy);
+   let inShift = false;
+  function shift(members, dx, dy) {
+    inShift = true;
+    try {
+      if (members.length === 1) { movePixel(members[0], members[0].x + dx, members[0].y + dy); return; }
+      // move the leading edge first so cells are free when needed
+      members.sort((a, b) => (b.x * dx + b.y * dy) - (a.x * dx + a.y * dy));
+      for (const m of members) movePixel(m, m.x + dx, m.y + dy);
+    } finally { inShift = false; }
   }
 
   function step(p) {
@@ -211,7 +212,27 @@
       if (b.single) b.ref.rpf = pixelTicks; else b.frame = pixelTicks;
     }
   }
+  
+  // ---------- pusher / external push support ----------
+  // When something else (pusher, piston, etc.) moves a linked pixel,
+  // move the entire linked object by the same amount instead of tearing it.
+  if (typeof movePixel === "function") {
+    const origMove = movePixel;
+    movePixel = function (pixel, x, y, ...rest) {
+      if (inShift || !pixel || !pixel.link) return origMove.call(this, pixel, x, y, ...rest);
+      const g = getGroup(pixel.link);
+      if (!g) return origMove.call(this, pixel, x, y, ...rest);
 
+      const dx = x - pixel.x, dy = y - pixel.y;
+      if (!dx && !dy) return;
+      if (g.pushedTick === pixelTicks) return;          // already moved this tick (chain push)
+      if (g.members.some(isAnchor)) return;             // pinned / steel-linked: immovable
+      if (!canMove(g.members, g.set, dx, dy)) return;   // something blocks part of it: don't tear it
+
+      g.pushedTick = pixelTicks;
+      shift(g.members, dx, dy);
+    };
+  }
   // ---------- explosions ----------
   if (typeof explodeAt === "function") {
     const origExplode = explodeAt;
